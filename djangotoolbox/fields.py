@@ -1,11 +1,12 @@
 # All fields except for BlobField written by Jonas Haag <jonas@lophus.org>
 
 from django.core.exceptions import ValidationError
-from django.utils.importlib import import_module
+from importlib import import_module
 from django.db import models
-from django.db.models.fields.subclassing import Creator
+from .compat import Creator
 from django.db.utils import IntegrityError
-from django.db.models.fields.related import add_lazy_relation
+from django.db.models.fields.related import lazy_related_operation
+import django
 
 
 __all__ = ('RawField', 'ListField', 'SetField', 'DictField',
@@ -94,7 +95,7 @@ class AbstractIterableField(models.Field):
                 self.item_field.rel.to = resolved_model
                 self.item_field.do_related_class(self, cls)
 
-            add_lazy_relation(cls, self, self.item_field.rel.to, _resolve_lookup)
+            lazy_related_operation(cls, self, self.item_field.rel.to, _resolve_lookup)
 
     def _map(self, function, iterable, *args, **kwargs):
         """
@@ -245,12 +246,24 @@ class EmbeddedModelField(models.Field):
           the embedded instance (not just pre_save, get_db_prep_* and
           to_python).
     """
-    __metaclass__ = models.SubfieldBase
 
     def __init__(self, embedded_model=None, *args, **kwargs):
         self.embedded_model = embedded_model
         kwargs.setdefault('default', None)
         super(EmbeddedModelField, self).__init__(*args, **kwargs)
+
+    if django.VERSION[:2] < (1, 8):
+        def contribute_to_class(self, cls, name, **kwargs):
+            """Emulate SubFieldBase for Django < 1.8"""
+            super(EmbeddedModelField, self).contribute_to_class(cls, name, **kwargs)
+            from django.db.models.fields import subclassing
+            setattr(cls, self.name, subclassing.Creator(self))
+
+    def from_db_value(self, value, expression, connection, context):
+        """Convert from the database format.
+        This should be the inverse of self.get_prep_value()
+        """
+        return self.to_python(value)
 
     def get_internal_type(self):
         return 'EmbeddedModelField'
