@@ -88,7 +88,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     database either can work with Python objects directly, sometimes
     representing one type using a another or expect everything encoded
     in some specific manner.
-
     Django normally handles conversions for the database by providing
     `BaseDatabaseOperations.value_to_db_*` / `convert_values` methods,
     but there are some problems with them:
@@ -106,12 +105,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     Don't use these standard methods in nonrel, `value_for/from_db` are
     more elastic and keeping all conversions in one place makes the
     code easier to analyse.
-
     Please note, that after changes to type conversions, data saved
     using preexisting methods needs to be handled; and also that Django
     does not expect any special database driver exceptions, so any such
     exceptions should be reraised as django.db.utils.DatabaseError.
-
     TODO: Consider replacing all `value_to_db_*` and `convert_values`
           with just `BaseDatabaseOperations.value_for/from_db` and also
           moving there code from `Field.get_db_prep_lookup` (and maybe
@@ -148,16 +145,13 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Assuming that the database has its own key type, leaves any
         conversions to the back-end.
-
         This method is added my nonrel to allow various types to be
         used for automatic primary keys. `AutoField.get_db_prep_value`
         calls it to prepare field's value for the database.
-
         Note that Django can pass a string representation of the value
         instead of the value itself (after receiving it as a query
         parameter for example), so you'll likely need to limit
         your `AutoFields` in a way that makes `str(value)` reversible.
-
         TODO: This could become a part of `value_for_db` if it makes
               to Django (with a `field_kind` condition).
         """
@@ -239,7 +233,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Does type-conversions needed before storing a value in the
         the database or using it as a filter parameter.
-
         This is a convience wrapper that only precomputes field's kind
         and a db_type for the field (or the primary key of the related
         model for ForeignKeys etc.) and knows that arguments to the
@@ -247,7 +240,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         while some other lookups take a list of arguments.
         In the end, it calls `_value_for_db` to do the real work; you
         should typically extend that method, but only call this one.
-
         :param value: A value to be passed to the database driver
         :param field: A field the value comes from
         :param lookup: None if the value is being prepared for storage;
@@ -271,7 +263,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     def value_from_db(self, value, field):
         """
         Performs deconversions defined by `_value_from_db`.
-
         :param value: A value received from the database client
         :param field: A field the value is meant for
         """
@@ -301,13 +292,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Converts a standard Python value to a type that can be stored
         or processed by the database driver.
-
         This implementation only converts elements of iterables passed
         by collection fields, evaluates Django's lazy objects and
         marked strings and handles embedded models.
         Currently, we assume that dict keys and column, model, module
         names (strings) of embedded models require no conversion.
-
         We need to know the field for two reasons:
         -- to allow back-ends having separate key spaces for different
            tables to create keys refering to the right table (which can
@@ -319,10 +308,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         Avoid using the field in any other way than by inspecting its
         properties, it may not hold any value or hold a value other
         than the one you're asked to convert.
-
         You may want to call this method before doing other back-end
         specific conversions.
-
         :param value: A value to be passed to the database driver
         :param field: A field having the same properties as the field
                       the value comes from; instead of related fields
@@ -377,20 +364,16 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     def _value_from_db(self, value, field, field_kind, db_type):
         """
         Converts a database type to a type acceptable by the field.
-
         If you encoded a value for storage in the database, reverse the
         encoding here. This implementation only recursively deconverts
         elements of collection fields and handles embedded models.
-
         You may want to call this method after any back-end specific
         deconversions.
-
         :param value: A value to be passed to the database driver
         :param field: A field having the same properties as the field
                       the value comes from
         :param field_kind: Equal to field.get_internal_type()
         :param db_type: Same as creation.db_type(field)
-
         Note: lookup values never get deconverted.
         """
 
@@ -414,12 +397,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                  lookup):
         """
         Recursively converts values from AbstractIterableFields.
-
         Note that collection lookup values are plain values rather than
         lists, sets or dicts, but they still should be converted as a
         collection item (assuming all items or values are converted in
         the same way).
-
         We base the conversion on field class / kind and assume some
         knowledge about field internals (e.g. that the field has an
         "item_field" property that gives the right subfield for any of
@@ -428,7 +409,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         rather than inside get_db_prep_save/lookup for symmetry with
         deconversion (which can't be in to_python because the method is
         also used for data not coming from the database).
-
         Returns a list, set, dict, string or bytes according to the
         db_type given.
         If the "list" db_type used for DictField, a list with keys and
@@ -476,7 +456,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                     for subvalue in value)
 
                 # "list" may be used for SetField.
-                if db_type in 'list':
+                if db_type in ('list',):
                     return list(value)
                 elif db_type == 'set':
                     # assert field_kind != 'ListField'
@@ -496,10 +476,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     def _value_from_db_collection(self, value, field, field_kind, db_type):
         """
         Recursively deconverts values for AbstractIterableFields.
-
         Assumes that all values in a collection can be deconverted
         using a single field (Field.item_field, possibly a RawField).
-
         Returns a value in a format proper for the field kind (the
         value will normally not go through to_python).
         """
@@ -545,11 +523,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Converts a field => value mapping received from an
         EmbeddedModelField the format chosen for the field storage.
-
         The embedded instance fields' values are also converted /
         deconverted using value_for/from_db, so any back-end
         conversions will be applied.
-
         Returns (field.column, value) pairs, possibly augmented with
         model info (to be able to deconvert the embedded instance for
         untyped fields) encoded according to the db_type chosen.
@@ -562,7 +538,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         protocol 0 or 2 respectively.
         If an unknown db_type is used a generator yielding (column,
         value) pairs with values converted will be returned.
-
         TODO: How should EmbeddedModelField lookups work?
         """
         if lookup:
@@ -593,10 +568,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     def _value_from_db_model(self, value, field, field_kind, db_type):
         """
         Deconverts values stored for EmbeddedModelFields.
-
         Embedded instances are stored as a (column, value) pairs in a
         dict, a single-flattened list or a serialized dict.
-
         Returns a tuple with model class and field.attname => value
         mapping.
         """
@@ -624,10 +597,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         Converts value to be used as a key to an acceptable type.
         On default we do no encoding, only allowing key values directly
         acceptable by the database for its key type (if any).
-
         The conversion has to be reversible given the field type,
         encoding should preserve comparisons.
-
         Use this to expand the set of fields that can be used as
         primary keys, return value suitable for a key rather than
         a key itself.

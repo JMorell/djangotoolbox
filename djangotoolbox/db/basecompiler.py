@@ -28,7 +28,13 @@ if django.VERSION >= (1, 5):
 else:
     from django.db.models.sql.constants import LOOKUP_SEP
 
-if django.VERSION >= (1, 6):
+if django.VERSION >= (1, 8):
+    def get_selected_fields(query):
+        if query.select:
+            return [col.field for col, __, __ in query.get_compiler('default').get_select()[0]]
+        else:
+            return query.model._meta.fields
+elif django.VERSION >= (1, 6):
     def get_selected_fields(query):
         if query.select:
             return [info.field for info in (query.select +
@@ -59,19 +65,15 @@ EMULATED_OPS = {
 class NonrelQuery(object):
     """
     Base class for nonrel queries.
-
     Compilers build a nonrel query when they want to fetch some data.
     They work by first allowing sql.compiler.SQLCompiler to partly build
     a sql.Query, constructing a NonrelQuery query on top of it, and then
     iterating over its results.
-
     This class provides in-memory filtering and ordering and a
     framework for converting SQL constraint tree built by Django to a
     "representation" more suitable for most NoSQL databases.
-
     TODO: Replace with FetchCompiler, there are too many query concepts
           around, and it isn't a good abstraction for NoSQL databases.
-
     TODO: Nonrel currently uses constraint's tree built by Django for
           its SQL back-ends to handle filtering. However, Django
           intermingles translating its lookup / filtering abstraction
@@ -115,7 +117,6 @@ class NonrelQuery(object):
         """
         Reorders query results or execution order. Called by
         NonrelCompilers during query building.
-
         :param ordering: A list with (field, ascending) tuples or a
                          boolean -- use natural ordering, if any, when
                          the argument is True and its reverse otherwise
@@ -126,7 +127,6 @@ class NonrelQuery(object):
         """
         Adds a single constraint to the query. Called by add_filters for
         each constraint leaf in the WHERE tree built by Django.
-
         :param field: Lookup field (instance of Field); field.column
                       should be used for database keys
         :param lookup_type: Lookup name (e.g. "startswith")
@@ -141,10 +141,8 @@ class NonrelQuery(object):
         Converts a constraint tree (sql.where.WhereNode) created by
         Django's SQL query machinery to nonrel style filters, calling
         add_filter for each constraint.
-
         This assumes the database doesn't support alternatives of
         constraints, you should override this method if it does.
-
         TODO: Simulate both conjunctions and alternatives in general
               let GAE override conjunctions not to split them into
               multiple queries.
@@ -246,7 +244,6 @@ class NonrelQuery(object):
         Undoes preparations done by `Field.get_db_prep_lookup` not
         suitable for nonrel back-ends and passes the lookup argument
         through nonrel's `value_for_db`.
-
         TODO: Blank `Field.get_db_prep_lookup` and remove this method.
         """
 
@@ -376,10 +373,8 @@ class NonrelQuery(object):
 class NonrelCompiler(SQLCompiler):
     """
     Base class for data fetching back-end compilers.
-
     Note that nonrel compilers derive from sql.compiler.SQLCompiler and
     thus hold a reference to a sql.Query, not a NonrelQuery.
-
     TODO: Separate FetchCompiler from the abstract NonrelCompiler.
     """
 
@@ -400,8 +395,8 @@ class NonrelCompiler(SQLCompiler):
         to this compiler. Called by QuerySet methods.
         """
 
+        fields = self.get_fields()
         if results is None:
-            fields = self.get_fields()
             try:
                 results = self.build_query(fields).fetch(
                     self.query.low_mark, self.query.high_mark)
@@ -459,7 +454,6 @@ class NonrelCompiler(SQLCompiler):
     def _make_result(self, entity, fields):
         """
         Decodes values for the given fields from the database entity.
-
         The entity is assumed to be a dict using field database column
         names as keys. Decodes values using `value_from_db` as well as
         the standard `convert_values`.
@@ -483,7 +477,6 @@ class NonrelCompiler(SQLCompiler):
     def check_query(self):
         """
         Checks if the current query is supported by the database.
-
         In general, we expect queries requiring JOINs (many-to-many
         relations, abstract model bases, or model spanning filtering),
         using DISTINCT (through `QuerySet.distinct()`, which is not
@@ -493,13 +486,12 @@ class NonrelCompiler(SQLCompiler):
         if hasattr(self.query, 'is_empty') and self.query.is_empty():
             raise EmptyResultSet()
         if (len([a for a in self.query.alias_map if self.query.alias_refcount[a]]) > 1
-                or self.query.distinct or self.query.extra or self.query.having):
+                or self.query.distinct or self.query.extra or getattr(self.query, 'having', None)):
             raise DatabaseError("This query is not supported by the database.")
 
     def get_count(self, check_exists=False):
         """
         Counts objects matching the current filters / constraints.
-
         :param check_exists: Only check if any object matches
         """
         if check_exists:
@@ -546,7 +538,7 @@ class NonrelCompiler(SQLCompiler):
         # into `resolve_columns` because it wasn't selected.
         only_load = self.deferred_to_columns()
         if only_load:
-            db_table = self.query.model._meta.db_table
+            db_table = self.query.model
             only_load = dict((k, v) for k, v in only_load.items()
                              if v or k == db_table)
             if len(only_load.keys()) > 1:
@@ -554,7 +546,7 @@ class NonrelCompiler(SQLCompiler):
                                     "supported by non-relational DBs %s." %
                                     repr(only_load))
             fields = [f for f in fields if db_table in only_load and
-                      f.column in only_load[db_table]]
+                      f.attname in only_load[db_table]]
 
         query_model = self.query.model
         if query_model._meta.proxy:
@@ -608,7 +600,6 @@ class NonrelInsertCompiler(NonrelCompiler):
     Base class for all compliers that create new entities or objects
     in the database. It has to define execute_sql method due to being
     used in place of a SQLInsertCompiler.
-
     TODO: Analyze if it's always true that when field is None we should
           use the PK from self.query (check if the column assertion
           below ever fails).
@@ -645,11 +636,9 @@ class NonrelInsertCompiler(NonrelCompiler):
     def insert(self, values, return_id):
         """
         Creates a new entity to represent a model.
-
         Note that the returned key will go through the same database
         deconversions that every value coming from the database does
         (`convert_values` and `value_from_db`).
-
         :param values: The model object as a list of (field, value)
                        pairs; each value is already prepared for the
                        database
@@ -678,7 +667,6 @@ class NonrelUpdateCompiler(NonrelCompiler):
     def update(self, values):
         """
         Changes an entity that already exists in the database.
-
         :param values: A list of (field, new-value) pairs
         """
         raise NotImplementedError
