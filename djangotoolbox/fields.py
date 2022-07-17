@@ -289,7 +289,7 @@ class EmbeddedModelField(models.Field):
         our "model" attribute in its contribute_to_class method).
         """
         self._model = model
-        if model is not None and isinstance(self.embedded_model, basestring):
+        if model is not None and isinstance(self.embedded_model, str):
 
             def _resolve_lookup(self_, resolved_model, model):
                 self.embedded_model = resolved_model
